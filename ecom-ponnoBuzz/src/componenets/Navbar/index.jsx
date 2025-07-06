@@ -31,7 +31,7 @@ import { db } from "../../firebase";
 
 
 const drawerWidth = 240;
-const navItems = ["Home", "Products", "Become A Seller"];
+const navItems = ["Home", "Products"];
 
 function DrawerAppBar(props) {
   const { window } = props;
