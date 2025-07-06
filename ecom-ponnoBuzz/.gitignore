@@ -4,4 +4,6 @@ dist
 
 firebase.js
 
+.env.local
+
 netlify.toml

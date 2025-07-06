@@ -10,6 +10,9 @@ import {
 import React, { useEffect, useState } from "react";
 import { db } from "../../firebase";
 import { ToastAlert } from "../../utils/toast";
+import { loadStripe } from "@stripe/stripe-js";
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
 const index = (props) => {
   const [cartItem, setcartItem] = useState([]);
@@ -50,20 +53,89 @@ const index = (props) => {
     fetchData();
   }, [refresh]);
 
-  const clearCart = async () => {
-    try {
-      // Delete all documents from the "cart" collection
-      const querySnapshot = await getDocs(collection(db, "cart"));
-      querySnapshot.forEach(async (doc) => {
-        await deleteDoc(doc.ref);
-      });
-
-      // Clear the cart in the local state
-      setcartItem([]);
-      ToastAlert("you buy items", "success");
-    } catch (error) {
-      console.log("Error clearing cart:", error.message);
+  // Check for successful payment return from Stripe
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('payment_status');
+    
+    if (paymentStatus === 'success') {
+      // Clear cart after successful payment
+      const clearCartAfterPayment = async () => {
+        try {
+          const querySnapshot = await getDocs(collection(db, "cart"));
+          querySnapshot.forEach(async (doc) => {
+            await deleteDoc(doc.ref);
+          });
+          setcartItem([]);
+          ToastAlert("Payment successful! Items purchased.", "success");
+          
+          // Clean up URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (error) {
+          console.log("Error clearing cart after payment:", error);
+        }
+      };
+      if ( paymentStatus === 'cancel') {
+        ToastAlert("Payment cancelled.", "error");
+      }
+      
+      clearCartAfterPayment();
     }
+  }, []);
+
+  const clearCart = async () => {
+      const totalAmount = cartItem.reduce(
+        (total, obj) => total + (parseInt(obj.item.value.prize) * parseInt(obj.item.value.quantity)),
+        0
+      );
+    const line_items = [
+      {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Cart Items',
+          },
+          unit_amount: totalAmount * 100, // $50
+        },
+        quantity: 1,
+      },
+    ];
+  
+    const params = new URLSearchParams();
+
+  params.append('payment_method_types[]', 'card');
+  params.append('mode', 'payment');
+  params.append('success_url', window.location.origin + '/cart?payment_status=success');
+  params.append('cancel_url', window.location.origin + '/cart?payment_status=cancel');
+
+  // line_items[0][price_data][currency]=usd
+  params.append('line_items[0][price_data][currency]', 'usd');
+  params.append('line_items[0][price_data][product_data][name]', 'Cart Items');
+  params.append('line_items[0][price_data][unit_amount]', (totalAmount * 100).toString()); // $50
+  params.append('line_items[0][quantity]', '1');
+  
+  
+    const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${import.meta.env.VITE_STRIPE_SECRET_KEY}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params,
+    });
+  
+    const session = await response.json();
+  
+    if (session.error) {
+      ToastAlert(`Error: ${session.error.message}`, "error");
+      return;
+    }
+  
+    const stripe = await stripePromise;
+    await stripe.redirectToCheckout({ sessionId: session.id });
+
+    ToastAlert("Payment successful! Items purchased.", "success");
+    
   };
 
   // console.log(cartItem)
